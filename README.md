@@ -11,7 +11,7 @@ Thefollowing hardware is used in this project-
  - Adafruit FONA-808 GSM/GPRS/GPS mdoule
  - 3.7V lipo flat pack battery with JST-PH connector
  - 3V->5V Boost power supply (about $5 on ebay)
- - 
+
 ## Wiring
 Each component used in this sketch has a different communication protocol. The FONA uses serial, the MPU uses I2C and the MFRC uses SPI. The only points on the Arduino that have multiple connections are 5V and Gnd. So it is possible to wire point-to-point without pin-headers and end up with a pretty small package. (Small enough to hide inside a bicycle seat anyway...)
 
