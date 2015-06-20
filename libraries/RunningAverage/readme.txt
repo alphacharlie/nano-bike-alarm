@@ -1,0 +1,1 @@
+copied from http://playground.arduino.cc/Main/RunningAverage
