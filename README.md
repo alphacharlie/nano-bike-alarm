@@ -48,4 +48,10 @@ To use you simply place the provisioned PICC (card) in it's 'pocket' next to the
 When armed, the Arduino turns on the GPS, then scans the output from the MPU6050. If motion is sensed an SMS with the GPS coordinated, heading and speed of the bicycle are sent to the alert phone. SMS are sent every 3 minutes until motion stops or the alarm is disarmed. (I may change this to FORCE periodic SMS after alarm is triggered and not just if motion continues. I haven't decided yet.)
 
 ## Troubleshooting
+<<<<<<< HEAD
 IF you run into problems there is disabled debugging code in the sketch that can be used with the serial monitor to figure things out. But enabling the DEBUG #ifdefs is unlikely to work because the sketch uses too much space. So you'll probably need to enable the messages you need 'a la carte'. 
+=======
+IF you run into problems there is disabled debugging code in the sketch that can be used with the serial monitor to figure things out. But enabling the DEBUG #ifdefs is unlikely to work because the sketch uses too much space. So you'll probably need to enable the messages you need 'a la carte'. 
+
+
+>>>>>>> origin/master
