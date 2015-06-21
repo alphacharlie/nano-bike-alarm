@@ -121,7 +121,7 @@ RunningAverage meanZ(8);
 //    what's in the newKey sketch for authentication to succeed.
 
 //the cell phone number to send alert SMS to
-const char alertPhone[] = "8005551212"; // Change this to your cell #!!!!
+char alertPhone[] = "8005551212"; // Change this to your cell #!!!!
 
 //alarm sensitivity in percentage
 byte alarmSensitivity = 60; //set sensitivity of alarm 1 = lowest 100 = highest
