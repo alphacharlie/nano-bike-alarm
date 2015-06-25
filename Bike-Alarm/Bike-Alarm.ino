@@ -48,6 +48,20 @@
 #define FONA_TX 6
 #define FONA_RST 7
 
+#define BUZZER_PIN  8
+
+// only do this if the buzzer pin is set...
+#ifdef BUZZER_PIN
+
+//our only real user feedback during runtime is the buzzer. define some stuff for that...
+ uint16_t longBeep = 1000;
+ uint16_t medBeep = 500;
+ uint16_t shortBeep = 200;
+ bool buzzerState = LOW;
+ bool armNotified = false;
+ bool disarmNotified = false;
+#endif
+
 // this is a large buffer for replies
 char replybuffer[255];
 
@@ -284,6 +298,14 @@ boolean checkRFIDKey()
     if(mfrc522.PICC_IsNewCardPresent())
     {
     
+      //new card present, clear notification flag and beep once
+      disarmNotified = false;
+#ifdef BUZZER_PIN
+      digitalWrite(BUZZER_PIN, HIGH);
+      delay(shortBeep);
+      digitalWrite(BUZZER_PIN, LOW);
+      delay(shortBeep);
+#endif                  
       // Select one of the cards
    
       if ( ! mfrc522.PICC_ReadCardSerial())
@@ -349,8 +371,22 @@ boolean checkRFIDKey()
 
                   if(manageMe)
                     Serial.println(F("AUTH SUCCESS! Alarm Disarmed."));
-                    alarmArmed = false;
+                    if(!disarmNotified)
+                    {
+                      //beep twice so user knows alarm is disarmed;
+#ifdef BUZZER_PIN
+                      digitalWrite(BUZZER_PIN, HIGH);
+                      delay(shortBeep);
+                      digitalWrite(BUZZER_PIN, LOW);
+                      delay(medBeep);
+                      digitalWrite(BUZZER_PIN, HIGH);
+                      delay(shortBeep);
+                      digitalWrite(BUZZER_PIN, LOW);
+#endif  
+                      disarmNotified = true; 
+                      armNotified = false;                     
                     
+                    }                   
                     //reset multiple alert delay
                     loopCounter = 0;
                     //check once per second.
@@ -376,11 +412,27 @@ boolean checkRFIDKey()
         mpu.resetFIFO();
       }
     }
+		else if (!armNotified)
+    {
+      //we only get here if the alarm is armed...
+#ifdef BUZZER_PIN
+        //do one long beep to let the user know that the alarm is ARMED
+        digitalWrite(BUZZER_PIN, HIGH);
+        delay(longBeep);
+        digitalWrite(BUZZER_PIN, LOW);
+#endif
+        armNotified = true;
+        disarmNotified = false;
+    }
 }
 
 void setup() {
   if(Serial)
     manageMe = true;
+		
+#ifdef BUZZER_PIN
+  pinMode(BUZZER_PIN, OUTPUT);
+#endif
 
   if(manageMe)
   {
@@ -403,7 +455,15 @@ void setup() {
       Serial.print("\n");
     }
 #endif    
-    while (1);
+    while (1)
+		{
+#ifdef BUZZER_PIN
+      //error with FONA!!! beep continuously so user doeesn't think alarm is working
+      buzzerState = !buzzerState;
+      digitalWrite(BUZZER_PIN, buzzerState);
+      delay(medBeep);
+#endif
+    }
   }
 #ifdef DEBUG_FONA  
   if(manageMe)
