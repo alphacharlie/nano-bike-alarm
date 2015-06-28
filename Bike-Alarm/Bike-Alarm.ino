@@ -58,9 +58,15 @@
  uint16_t medBeep = 500;
  uint16_t shortBeep = 200;
  bool buzzerState = LOW;
+ bool settling = false;
  bool armNotified = false;
  bool disarmNotified = false;
-#endif
+ 
+ //  track whether we've sent a message and if the alarm is tripped.
+bool alertSent = false;
+bool alarmTripped = false;
+
+#endif 
 
 // this is a large buffer for replies
 char replybuffer[255];
@@ -126,9 +132,6 @@ RunningAverage meanX(8);
 RunningAverage meanY(8);
 RunningAverage meanZ(8);
 
-
-
-
 // BEGIN USER CONFIG
 
 // the following values are user configurable. Key, keyUIDs and blockTokenData must match 
@@ -172,10 +175,10 @@ byte tokenBlockData[16]    = {
 byte settleTime = 15;  //time to let the MPU settle after arming. Increase if you get false positive alarm right after arming.
 
 //   Integrate some time management to limit SMS and keep from TEXT BOMBING ourselves
-int messageDelay = 1800; //delay between messages in seconds * 10      (*default == 1800 == 3 minutes)
+int messageDelay = 1800; //minimum delay between messages in seconds * 10      (*default == 1800 == 3 minutes)
+int alertDelay = 9000; // maximum delay for alerts once triggered in seconds * 10 (if not moving...) set to 0 to only sent alerts when moving
 
-//  (set to true to temporarily disable sending of SMS. WARNING - will still send msg after messageDelay expires.)
-boolean alertSent = false;
+boolean pretend = false; // no not send text messages if true...
 
 //END USER CONFIG
 
@@ -195,8 +198,8 @@ boolean manageMe = false; //true if serial plugged in
 //count samples from mpu to let the averaging buffer fill
 
 byte samples = 0;
-uint16_t loopCounter = 0;
-
+uint16_t delayCounter = 0;
+uint16_t alertCounter = 0;
 /*
  *  Helper routine to compare byte arrays.,..
  */
@@ -294,6 +297,7 @@ boolean tryKey(MFRC522::MIFARE_Key *key)
 
 boolean checkRFIDKey()
 {
+   boolean retVal = false;
    // Look for new cards
     if(mfrc522.PICC_IsNewCardPresent())
     {
@@ -310,7 +314,7 @@ boolean checkRFIDKey()
    
       if ( ! mfrc522.PICC_ReadCardSerial())
       {
-        alarmArmed;
+        retVal = false;
       }
       else
       {
@@ -323,7 +327,7 @@ boolean checkRFIDKey()
           
           if(compareByteArray(_uid, mfrc522.uid.uidByte, 4))
           {
-            // is masterUID skip EEPROM
+            //is in keys list... move on to next step.
             if(tryKey(&masterKey))
             {
               if(manageMe)
@@ -351,7 +355,7 @@ boolean checkRFIDKey()
                     Serial.println(mfrc522.GetStatusCodeName(status));
                   }
 #endif       
-                  alarmArmed = true;
+                  retVal = false;
                   cardPresent = false;
                 }
 #ifdef DEBUG_RFID                
@@ -364,7 +368,8 @@ boolean checkRFIDKey()
 #endif
                 if(compareByteArray(buffer, tokenBlockData, 16))
                 {
-                  alarmArmed = false;
+                  //key is valid!
+                  retVal = true;
                   meanX.clear();
                   meanY.clear();
                   meanZ.clear();
@@ -388,27 +393,36 @@ boolean checkRFIDKey()
                       armNotified = false;                     
                     
                     }                   
-                    //reset multiple alert delay
-                    loopCounter = 0;
+                    //reset EVERYTHING
+                    alarmTripped = false;
+                    alertSent = false;
+                    alertCounter = 0;
+                    delayCounter = 0;
+
                     //check once per second.
-                    delay(1000);
+                    delay(1500); //reduce checks to once every 1.5 sec to save battery when disarmed.
                   //note this loop will continue to execute and until the PICC is removed 
                   //  at which point the alarm will ARM!
                 
                 }
-                else
+                else //token deos not match, return false
                 {
-                  alarmArmed = true;
+                  retVal = false;
                   cardPresent = false;  
                 }
               }  
             }
-            else
+            else //wrong PICC encryption/PIN return false
             {
-              alarmArmed = true;
+              retVal = false;
               cardPresent = false;  
             }   
           }
+          else //PICC UID is not in list, return false
+          {
+            retVal = false;
+            cardPresent = false;  
+          } 
         }
         //MPU FIFO has built up while we were doing this...
         mpu.resetFIFO();
@@ -416,7 +430,9 @@ boolean checkRFIDKey()
     }
 		else if (!armNotified)
     {
-      //we only get here if the alarm is armed...
+      //this give the MPU a few to settle before truly arming to prevent false positives...
+      settling = true;
+      //we only get here if the alarm is armed and the user hasn't been notified...
 #ifdef BUZZER_PIN
         //do one long beep to let the user know that the alarm is ARMED
         digitalWrite(BUZZER_PIN, HIGH);
@@ -426,6 +442,7 @@ boolean checkRFIDKey()
         armNotified = true;
         disarmNotified = false;
     }
+    return retVal;
 }
 
 void setup() {
@@ -602,6 +619,129 @@ void setup() {
 
 }
 
+bool sendAlert()
+{
+#ifdef DEBUG_GPS
+  if(manageMe)
+  {
+    //query coordinates
+    int8_t stat = fona.GPSstatus();
+    // check GPS fix
+    Serial.print(F("GPS status: "));
+    switch(stat)
+    {
+      case 0:
+        Serial.println(F("off"));
+        break;
+      case 1:
+        Serial.println(F("No fix"));
+        break;
+      case 2:
+        Serial.println(F("2D fix"));
+        break;
+      case 3:
+        Serial.println(F("3D fix"));
+        break;
+    }
+  }
+#endif                 
+  char coord[13];
+  char gpsdata[80];
+  //get GPS location
+  fona.getGPSlocation(gpsdata, 80);
+  
+  Serial.println(gpsdata);
+  char _sectionIndex = 0;
+  char* _section = strtok(gpsdata, ",");
+
+  char latD[3] = "";
+  char latM[8] = "";
+  char lonD[4] = "";
+  char lonM[9] = "";
+
+  short latDI = 0;
+  short lonDI = 0;
+  float latMF = 0.0;
+  float lonMF = 0.0;
+  float speedMS = 0.0;
+  float headingDeg = 0.0;
+                  
+                  
+  while (_section != 0)
+  { 
+    if(_sectionIndex == 1)
+    {
+      subString(_section, 0, 2, latD);
+      subString(_section, 2, 8, latM);
+      latDI = atoi(latD);
+      latMF = atof(latM);
+                      //is latitude
+    }
+    if(_sectionIndex == 2)
+    {
+      // is longitude
+      subString(_section, 0, 3, lonD);
+      subString(_section, 3, 9, lonM);
+      lonDI = atoi(lonD);
+      lonMF = atof(lonM);
+    }
+    // 3 is altitude in meters
+    // 4 is UTC time as YYYYMMDDHHMMSS.mS
+    // 5 is time to fix in seconds
+    // 6 is # of sateellites
+    if(_sectionIndex == 7)
+    {
+      // is speed
+      speedMS = atof(_section);
+    }
+    if(_sectionIndex == 8)
+    {
+      // is heading in degrees
+      headingDeg = atof(_section);
+    }
+    // Find the next section in input string
+    _section = strtok(0, ",");
+    _sectionIndex++;
+  }
+
+  //this next section parses the NMEA location string and generates a google maps link
+  char msg[141] = "Bike Alarm Triggered!!! Speed: ";
+  char szTmp[12];
+                  
+  dtostrf(speedMS, 2, 4, szTmp);               
+  strncat(msg, szTmp, 7);
+  strncat(msg, " M/S, Dir: ", 13);
+                             
+  dtostrf(headingDeg, 3, 3, szTmp);
+  strncat(msg, szTmp, 7);
+  strncat(msg, " Deg\n", 4);
+  strncat(msg, "GPS: http://maps.google.com/maps?q=", 35);
+
+  float _lat = latDI + (latMF / 60);
+  dtostrf(_lat, 8, 6, szTmp);
+  strncat(msg, szTmp, 9);    
+                  
+  strncat(msg, ",-", 2); //assuming longitude is east... fix this later ;-)                             
+                  
+  float _lon = lonDI + (lonMF / 60);
+  dtostrf(_lon, 9, 6, szTmp);
+  strncat(msg, szTmp, 10);
+               
+  // now send text message (with coordinates if available)
+  if(manageMe)
+    Serial.println(msg);
+                    
+  if (!fona.sendSMS(alertPhone, msg)) {
+    if(manageMe)
+      Serial.println(F("SMS Failed"));
+    return false;
+  } else {
+    if(manageMe)
+      Serial.println(F("Sent SMS!"));
+    return true;
+  }                                 
+}
+
 void loop() {
     if(Serial)
       manageMe = true;
@@ -613,12 +753,21 @@ void loop() {
       {
         Serial.print(F("MPU programming Failed!!!!"));
         Serial.print("\n");
+        
       }
-#endif  
+#endif 
+      //this is an error state, beep as long as it continues....
+
+#ifdef BUZZER_PIN
+      digitalWrite(BUZZER_PIN, HIGH);
+      delay(medBeep);
+      digitalWrite(BUZZER_PIN, LOW);
+#endif
       return;
+ 
     }
 
-    alarmArmed = !checkRFIDKey();
+    alarmArmed = !checkRFIDKey(); // if key is not present alarm is armed.
     
     if(alarmArmed)
     {
@@ -704,7 +853,7 @@ void loop() {
             }
             else
             {
-              
+              //these are our trigger points for motion. 
               int16_t minX = meanX.getAverage() - sense;
               int16_t maxX = meanX.getAverage() + sense;
               int16_t minY = meanY.getAverage() - sense;
@@ -716,144 +865,41 @@ void loop() {
               if(samples > 11 && (aaWorld.x < minX || aaWorld.x > maxX ||
                 aaWorld.y < minY || aaWorld.y > maxY ||
                 aaWorld.z < minZ || aaWorld.z > maxZ)){
-#ifdef DEBUG_MPU                   
-                  //motion detected!!!
-                  Serial.println(F("Motion Detected!!! "));
-                  Serial.print(aaWorld.x);
-                  Serial.print(":");
-                  Serial.println(meanX.getAverage());
+
+                 //motion detected!!!
+                 if(!settling)
+                 {
+                    //alarm triggered
+                    alarmTripped = true;
+                                   
+#ifdef DEBUG_MPU                                  
+                    Serial.println(F("Motion Detected!!! "));
+                    Serial.print(aaWorld.x);
+                    Serial.print(":");
+                    Serial.println(meanX.getAverage());
                   
-                  Serial.print(aaWorld.y);
-                  Serial.print(":");
-                  Serial.println(meanY.getAverage());
+                    Serial.print(aaWorld.y);
+                    Serial.print(":");
+                    Serial.println(meanY.getAverage());
                   
-                  Serial.print(aaWorld.z);
-                  Serial.print(":");
-                  Serial.println(meanZ.getAverage());                 
+                    Serial.print(aaWorld.z);
+                    Serial.print(":");
+                    Serial.println(meanZ.getAverage());                 
 #endif
-
-#ifdef DEBUG_GPS
-                  //query coordinates
-                  int8_t stat = fona.GPSstatus();
-                  // check GPS fix
-                  Serial.print(F("GPS status: "));
-                  switch(stat)
-                  {
-                    case 0:
-                      Serial.println(F("off"));
-                      break;
-                    case 1:
-                      Serial.println(F("No fix"));
-                      break;
-                    case 2:
-                      Serial.println(F("2D fix"));
-                      break;
-                    case 3:
-                      Serial.println(F("3D fix"));
-                      break;
-                  }
-#endif                 
-                  char coord[13];
-                  char gpsdata[80];
-                  fona.getGPSlocation(gpsdata, 80);
-                  Serial.println(gpsdata);
-                  char _sectionIndex = 0;
-
-                  char* _section = strtok(gpsdata, ",");
-
-                  char latD[3] = "";
-                  char latM[8] = "";
-                  char lonD[4] = "";
-                  char lonM[9] = "";
-
-                  short latDI = 0;
-                  short lonDI = 0;
-                  float latMF = 0.0;
-                  float lonMF = 0.0;
-                  float speedMS = 0.0;
-                  float headingDeg = 0.0;
-                  
-                  
-                  while (_section != 0)
-                  { 
-                    if(_sectionIndex == 1)
+                    //now we check and send the message if we havent already...
+                    if(!alertSent)
                     {
-                      subString(_section, 0, 2, latD);
-                      subString(_section, 2, 8, latM);
-                      latDI = atoi(latD);
-                      latMF = atof(latM);
-                      //is latitude
+                      alertSent = sendAlert();
                     }
-                    if(_sectionIndex == 2)
-                    {
-                      // is longitude
-                      subString(_section, 0, 3, lonD);
-                      subString(_section, 3, 9, lonM);
-                      lonDI = atoi(lonD);
-                      lonMF = atof(lonM);
-                    }
-                    // 3 is altitude in meters
-                    // 4 is UTC time as YYYYMMDDHHMMSS.mS
-                    // 5 is time to fix in seconds
-                    // 6 is # of sateellites
-                    if(_sectionIndex == 7)
-                    {
-                      // is speed
-                      speedMS = atof(_section);
-                    }
-                    if(_sectionIndex == 8)
-                    {
-                      // is heading in degrees
-                      headingDeg = atof(_section);
-                    }
-                    // Find the next section in input string
-                    _section = strtok(0, ",");
-                    _sectionIndex++;
-                  }
 
-                  //this next section parses the NMEA location string and generates a google maps link
-                  char msg[141] = "Bike Alarm Triggered!!! Speed: ";
-                  char szTmp[12];
-                  
-                  dtostrf(speedMS, 2, 4, szTmp);               
-                  strncat(msg, szTmp, 7);
-                  strncat(msg, " M/S, Dir: ", 13);
-                             
-                  dtostrf(headingDeg, 3, 3, szTmp);
-                  strncat(msg, szTmp, 7);
-                  strncat(msg, " Deg\n", 4);
-                  strncat(msg, "GPS: http://maps.google.com/maps?q=", 35);
+                    //that took long enough that we should reset our buffer to prevent a false positive or overrun on the next loop
+                    meanX.clear();
+                    meanY.clear();
+                    meanZ.clear();
+                    samples = 0;
+                    mpu.resetFIFO();
+                 }
 
-                  float _lat = latDI + (latMF / 60);
-                  dtostrf(_lat, 8, 6, szTmp);
-                  strncat(msg, szTmp, 9);    
-                  
-                  strncat(msg, ",-", 2); //assuming longitude is east... fix this later ;-)                             
-                  
-                  float _lon = lonDI + (lonMF / 60);
-                  dtostrf(_lon, 9, 6, szTmp);
-                  strncat(msg, szTmp, 10);
-
-                  
-                  // now then send text message (with coordinates if available)
-
-                  Serial.println(msg);
-                  if(!alertSent && ( loopCounter * 10 >= settleTime))
-                  {    
-                    if (!fona.sendSMS(alertPhone, msg)) {
-                      Serial.println(F("SMS Failed"));
-                    } else {
-                      Serial.println(F("Sent SMS!"));
-                      alertSent = true;
-                    }
-                  }
-                  
-                  //that took long enough that we should reset our buffer to prevent a false positive
-                  meanX.clear();
-                  meanY.clear();
-                  meanZ.clear();
-                  samples = 0;
-                  mpu.resetFIFO();
                   
                }
               meanX.addValue(aaWorld.x);
@@ -873,13 +919,46 @@ void loop() {
         // blink LED to indicate activity
         blinkState = !blinkState;
         digitalWrite(LED_PIN, blinkState);
+        
+        //extra check for key (might prevent unnecessary SMS if queued?)
         alarmArmed = !checkRFIDKey();
-        loopCounter++;
-        if(loopCounter > messageDelay) //delay has elapsed, reset and send an SMS on the next loop...
+        
+        delayCounter++;
+        
+        if(alarmTripped)
+          alertCounter++;
+        
+        //check our 'settling'
+        if(settling)
         {
-          loopCounter = 0;
+          if(delayCounter > (settleTime * 10))
+            settling = false;
+        }
+
+        
+        //minimum delay has expired
+        if(delayCounter > messageDelay) //delay has elapsed, reset and send an SMS on the next loop...
+        {         
+          // if alert delay is 0 then we just reset after the min delay and wait for movement
+          delayCounter = 0;
           alertSent = false;
-          Serial.println(F("Delay expired!"));
+          if(manageMe)
+           Serial.println(F("Delay expired!"));
+        }
+        // max delay has expired. send alert if alarm tripped
+        if(alertDelay != 0 && (alertCounter > alertDelay) && alarmTripped)
+        {
+          //make sure we didn't just send one from the other trigger...
+          if(!alertSent)
+          {
+            if(sendAlert())
+            {
+              alertCounter = 0;
+              //reset delay counter here also to enforce delay
+              delayCounter = 0;  
+              alertSent = true;
+            }
+          }
         }
       }
     }
