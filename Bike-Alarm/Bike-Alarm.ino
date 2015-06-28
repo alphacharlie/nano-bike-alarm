@@ -174,11 +174,10 @@ byte tokenBlockData[16]    = {
 
 byte settleTime = 15;  //time to let the MPU settle after arming. Increase if you get false positive alarm right after arming.
 
-//   Integrate some time management to limit SMS and keep from TEXT BOMBING ourselves
-int messageDelay = 1800; //minimum delay between messages in seconds * 10      (*default == 1800 == 3 minutes)
-int alertDelay = 9000; // maximum delay for alerts once triggered in seconds * 10 (if not moving...) set to 0 to only sent alerts when moving
-
-boolean pretend = false; // no not send text messages if true...
+//   Integrate some loop management to limit SMS and keep from TEXT BOMBING ourselves
+int messageDelay = 1200; //minimum delay between messages in loops  (one loop is around 200mS so 1200 = 1200 * 0.2 ~ 240 seconds
+int alertDelay = 6000; // delay for follow-up alerts once triggered.(in loops) Set to 0 to only send alerts if moving...
+boolean pretend = false; // do not send text messages if true...
 
 //END USER CONFIG
 
@@ -390,16 +389,15 @@ boolean checkRFIDKey()
                       digitalWrite(BUZZER_PIN, LOW);
 #endif  
                       disarmNotified = true; 
-                      armNotified = false;                     
-                    
-                    }                   
-                    //reset EVERYTHING
-                    alarmTripped = false;
-                    alertSent = false;
-                    alertCounter = 0;
-                    delayCounter = 0;
-
-                    //check once per second.
+                      armNotified = false;   
+                                        
+                      //reset EVERYTHING
+                      alarmTripped = false;
+                      alertSent = false;
+                      alertCounter = 0;
+                      delayCounter = 0;
+                    }          
+                             
                     delay(1500); //reduce checks to once every 1.5 sec to save battery when disarmed.
                   //note this loop will continue to execute and until the PICC is removed 
                   //  at which point the alarm will ARM!
@@ -430,7 +428,7 @@ boolean checkRFIDKey()
     }
 		else if (!armNotified)
     {
-		  //we are trying to ARM
+      //we are trying to ARM
       //check phone network status and beep continuously if no network
       uint8_t n = fona.getNetworkStatus();
       if(manageMe)
@@ -759,16 +757,25 @@ bool sendAlert()
   // now send text message (with coordinates if available)
   if(manageMe)
     Serial.println(msg);
-                    
-  if (!fona.sendSMS(alertPhone, msg)) {
+  if(pretend)
+  {
     if(manageMe)
-      Serial.println(F("SMS Failed"));
-    return false;
-  } else {
-    if(manageMe)
-      Serial.println(F("Sent SMS!"));
-    return true;
-  }                                 
+      Serial.println(F("pretend is TRUE. Disable to send SMS for real."));
+    return true;               
+  }
+  else
+  {
+    if (!fona.sendSMS(alertPhone, msg)) {
+      if(manageMe)
+        Serial.println(F("SMS Failed"));
+      return false;
+    } else {
+      if(manageMe)
+        Serial.println(F("Sent SMS!"));
+      return true;
+    } 
+  }
+                                
 }
 
 void loop() {
@@ -964,6 +971,7 @@ void loop() {
             settling = false;
         }
 
+
         
         //minimum delay has expired
         if(delayCounter > messageDelay) //delay has elapsed, reset and send an SMS on the next loop...
@@ -977,7 +985,7 @@ void loop() {
         // max delay has expired. send alert if alarm tripped
         if(alertDelay != 0 && (alertCounter > alertDelay) && alarmTripped)
         {
-          //make sure we didn't just send one from the other trigger...
+          //make sure we did'nt just send one from the other trigger...
           if(!alertSent)
           {
             if(sendAlert())
