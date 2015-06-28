@@ -351,6 +351,7 @@ boolean checkRFIDKey()
                     Serial.println(mfrc522.GetStatusCodeName(status));
                   }
 #endif       
+                  alarmArmed = true;
                   cardPresent = false;
                 }
 #ifdef DEBUG_RFID                
@@ -405,6 +406,7 @@ boolean checkRFIDKey()
             else
             {
               alarmArmed = true;
+              cardPresent = false;  
             }   
           }
         }
