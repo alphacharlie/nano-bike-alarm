@@ -430,6 +430,35 @@ boolean checkRFIDKey()
     }
 		else if (!armNotified)
     {
+		  //we are trying to ARM
+      //check phone network status and beep continuously if no network
+      uint8_t n = fona.getNetworkStatus();
+      if(manageMe)
+      {
+        Serial.print(F("Network status ")); 
+        Serial.print(n);
+        Serial.print(F(": "));
+        if (n == 0) Serial.println(F("Not registered"));
+        if (n == 1) Serial.println(F("Registered (home)"));
+        if (n == 2) Serial.println(F("Not registered (searching)"));
+        if (n == 3) Serial.println(F("Denied"));
+        if (n == 4) Serial.println(F("Unknown"));
+        if (n == 5) Serial.println(F("Registered roaming"));
+      }
+#ifdef BUZZER_PIN
+      //check for cell signal and beep if there isn't one to alert the user that the alarm WILL NOT FUNCTION
+      //beep until cell signal or until card...
+      bool _buzz = false;
+      while((n != 1 && n != 5) && !mfrc522.PICC_IsNewCardPresent())
+      {
+        //no signal...
+        _buzz = !_buzz;
+        digitalWrite(BUZZER_PIN, _buzz);
+        delay(shortBeep);
+        uint8_t n = fona.getNetworkStatus();
+      }
+      digitalWrite(BUZZER_PIN, LOW);
+#endif
       //this give the MPU a few to settle before truly arming to prevent false positives...
       settling = true;
       //we only get here if the alarm is armed and the user hasn't been notified...
