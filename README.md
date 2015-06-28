@@ -4,18 +4,17 @@ and the MRFID522 Mifare RFID reader.
 
 ## Hardware 
 Thefollowing hardware is used in this project-
- - Arduino Nano V3
+ - Arduino Pro Mini @ 3V, 8MHz
  - MPU6050 accelerometer breakout
  - MFRC-522 RFID reader
  - Mifare 1K classic PICC RFID cards
  - Adafruit FONA-808 GSM/GPRS/GPS mdoule
  - 3.7V lipo flat pack battery with JST-PH connector
- - 3V->5V Boost power supply (about $5 on ebay)
 
 ## Wiring
 Each component used in this sketch has a different communication protocol. The FONA uses serial, the MPU uses I2C and the MFRC uses SPI. The only points on the Arduino that have multiple connections are 5V and Gnd. So it is possible to wire point-to-point without pin-headers and end up with a pretty small package. (Small enough to hide inside a bicycle seat anyway...)
 
-See WiringDiagram.png for wiring details.
+More about the hardware for this project on it's Hackaday page - https://hackaday.io/project/6382-nano-bike-alarm
 
 ## Prerequisites
 This sketch uses the following Arduino Libraries and will not compile without them-
@@ -43,15 +42,14 @@ Once it's set up, the last thing to do is install it on your bike. It can be hid
 You'll want some sort of pocket to hold the PICC card next to the reader under your seat or on the battery box.
 
 ##Usage
-To use you simply place the provisioned PICC (card) in it's 'pocket' next to the reader. Once the reader authenticates the PICC, the alarm is disarmed. Removing the PICC arms the alarm.
+To use you simply place the provisioned PICC (card) in it's 'pocket' next to the reader. Once the reader authenticates the PICC, the alarm is disarmed (it will beep three short beeps). Removing the PICC arms the alarm (it will beep one long beep).
 
-When armed, the Arduino turns on the GPS, then scans the output from the MPU6050. If motion is sensed an SMS with the GPS coordinated, heading and speed of the bicycle are sent to the alert phone. SMS are sent every 3 minutes until motion stops or the alarm is disarmed. (I may change this to FORCE periodic SMS after alarm is triggered and not just if motion continues. I haven't decided yet.)
+When armed, the Arduino turns on the GPS, then scans the output from the MPU6050. If motion is sensed an SMS with the GPS coordinated, heading and speed of the bicycle are sent to the alert phone. SMS are limited to once every four minutes and once tripped the alarm will send an SMS every 10 minutes until disarmed. (This behavior can be changed with the alertDelay setting.)
 
 ## Troubleshooting
-<<<<<<< HEAD
 IF you run into problems there is disabled debugging code in the sketch that can be used with the serial monitor to figure things out. But enabling the DEBUG #ifdefs is unlikely to work because the sketch uses too much space. So you'll probably need to enable the messages you need 'a la carte'. 
-=======
-IF you run into problems there is disabled debugging code in the sketch that can be used with the serial monitor to figure things out. But enabling the DEBUG #ifdefs is unlikely to work because the sketch uses too much space. So you'll probably need to enable the messages you need 'a la carte'. 
+
+If you try to load the sketch and get continuous beeping when starting check yourr hardware. If you get a continuous fast beep when arming, them means your FONA is not connected to the network. Check your SIM and GSM antenna.
 
 
 >>>>>>> origin/master
