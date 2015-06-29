@@ -84,7 +84,6 @@ byte  readline(char *buff, byte  maxbuff, uint16_t timeout = 0);
 MFRC522 mfrc522(SS_PIN, RST_PIN);   // Create MFRC522 instance.
 
 MFRC522::MIFARE_Key masterKey; // master key object - New!
-// MFRC522::MIFARE_Key defaultKey; // default key (all 0xFF) for provisioning new keys
 
 // class default I2C address is 0x68
 // specific I2C addresses may be passed as a parameter here
@@ -143,9 +142,6 @@ char alertPhone[] = "8005551212"; // Change this to your cell #!!!!
 //alarm sensitivity in percentage
 byte alarmSensitivity = 60; //set sensitivity of alarm 1 = lowest 100 = highest
 
-// this is the actual gap allowed between the sensor reading and the average before motion sensed
-uint16_t sense = (101 - alarmSensitivity) * 10;
-
 //this is key A for our RFID (Note : DO NOT use the default key of FFFFFFFFFFFF or the one provided!!! Make up your own.)
 byte  alarmKeyA[6] = { 0x3b, 0x32, 0xa8, 0xc3, 0x3f, 0xf5 };
 
@@ -183,6 +179,8 @@ boolean pretend = false; // do not send text messages if true...
 
 
 
+// this is the actual gap allowed between the sensor reading and the average before motion sensed
+uint16_t sense = (101 - alarmSensitivity) * 10;
 
 //calculate block addresses from sector chosen.
 byte tokenBlock = sector * 4;;
@@ -293,7 +291,6 @@ boolean tryKey(MFRC522::MIFARE_Key *key)
     return result;
 }
 
-
 boolean checkRFIDKey()
 {
    boolean retVal = false;
@@ -319,7 +316,8 @@ boolean checkRFIDKey()
       {
         boolean cardPresent = true;
         byte _uid[4] = {0, 0, 0, 0};
-        for (byte u = 0; u < N_UIDS; u++) {
+        for (byte u = 0; u < N_UIDS; u++) 
+        {
           for (byte j = 0; j < 4; j++) {
             _uid[j] = keyUIDs[u][j];
           }
@@ -389,15 +387,18 @@ boolean checkRFIDKey()
                       digitalWrite(BUZZER_PIN, LOW);
 #endif  
                       disarmNotified = true; 
-                      armNotified = false;   
-                                        
+                      armNotified = false;  
+                                         
                       //reset EVERYTHING
                       alarmTripped = false;
                       alertSent = false;
                       alertCounter = 0;
                       delayCounter = 0;
-                    }          
-                             
+                      
+                    }                   
+
+
+                    //check once per second.
                     delay(1500); //reduce checks to once every 1.5 sec to save battery when disarmed.
                   //note this loop will continue to execute and until the PICC is removed 
                   //  at which point the alarm will ARM!
@@ -416,11 +417,7 @@ boolean checkRFIDKey()
               cardPresent = false;  
             }   
           }
-          else //PICC UID is not in list, return false
-          {
-            retVal = false;
-            cardPresent = false;  
-          } 
+
         }
         //MPU FIFO has built up while we were doing this...
         mpu.resetFIFO();
@@ -642,7 +639,8 @@ void setup() {
     // configure LED for output
     pinMode(LED_PIN, OUTPUT);
 
-
+    //insert a delay here so we do't beep out on the network being down while the cell phone boots
+    delay(3000);
 
 }
 
@@ -967,12 +965,10 @@ void loop() {
         //check our 'settling'
         if(settling)
         {
-          if(delayCounter > (settleTime * 10))
+          if(delayCounter > (settleTime * 6))
             settling = false;
         }
-
-
-        
+   
         //minimum delay has expired
         if(delayCounter > messageDelay) //delay has elapsed, reset and send an SMS on the next loop...
         {         
@@ -1000,4 +996,3 @@ void loop() {
       }
     }
 }
-
