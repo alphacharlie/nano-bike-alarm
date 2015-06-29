@@ -3,7 +3,6 @@
  *  Works by sensing presence of RFID. If not present alarm is armed. If alarm is armed and 
  *  motion is detected the unit can:
  *   - Sends a text message to the specified phone number
- *   - Voice call the specified phone number
  *   - Enable GPS and 'phone home' with a fix at specified intervals until the alarm is disarmed.
  *   
  *   To use this sketch there are several variables that you'll have to edit, scroll down to BEGIN USER CONFIG 
