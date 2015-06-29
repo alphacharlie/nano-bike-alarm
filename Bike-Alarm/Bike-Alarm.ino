@@ -1,5 +1,3 @@
-#include <RunningAverage.h>
-
 /* 
  *  Sketch using an Arduino Nano, a FONA 808, MFRC522 RFID and an MPU6050 as a silent bicycle alarm. 
  *  Works by sensing presence of RFID. If not present alarm is armed. If alarm is armed and 
@@ -28,7 +26,10 @@
 // #define DEBUG_MPU
 // #define DEBUG_GPS
 // #define DEBUG_RFID
+// #define DEBUG_MSG
+// #define DEBUG_LOOP
 
+#include <RunningAverage.h>
 #include <SoftwareSerial.h>
 #include <Adafruit_FONA.h>
 #include <SPI.h>
@@ -49,6 +50,7 @@
 #define FONA_RST 7
 
 #define BUZZER_PIN  8
+
 
 // only do this if the buzzer pin is set...
 #ifdef BUZZER_PIN
@@ -178,7 +180,6 @@ boolean pretend = false; // do not send text messages if true...
 //END USER CONFIG
 
 
-
 // this is the actual gap allowed between the sensor reading and the average before motion sensed
 uint16_t sense = (101 - alarmSensitivity) * 10;
 
@@ -193,10 +194,10 @@ boolean phoneHome = false;
 boolean manageMe = false; //true if serial plugged in
 
 //count samples from mpu to let the averaging buffer fill
-
 byte samples = 0;
 uint16_t delayCounter = 0;
 uint16_t alertCounter = 0;
+
 /*
  *  Helper routine to compare byte arrays.,..
  */
@@ -208,6 +209,22 @@ boolean compareByteArray(byte a[], byte b[],int array_size)
    return(true);
 }
 
+/*
+ * we are erroring out! Beep FOREVER.
+ */
+void errorBeep(uint16_t beepDelay)
+{
+      while (1)
+    {
+#ifdef BUZZER_PIN
+      //error with FONA!!! beep continuously so user doeesn't think alarm is working
+      buzzerState = !buzzerState;
+      digitalWrite(BUZZER_PIN, buzzerState);
+#endif
+      delay(beepDelay);
+    }
+}
+
 /**
  * Helper routine to dump a byte array as hex values to Serial.
  */
@@ -217,6 +234,7 @@ void dumpByteArray(byte *buffer, byte bufferSize) {
         Serial.print(buffer[i], HEX);
     }
 }
+
 /**
  * Helper routine to copy a substring (we are avoiding the 'String' object due to size constraints.
  */
@@ -232,6 +250,7 @@ char* subString (const char* input, int offset, int len, char* dest)
   strncpy (dest, input + offset, len);
   return dest;
 }
+
 /*
  * Try using the PICC (the tag/card) with the given key to access block 0.
  * On success, it will show the key details, and dump the block data on Serial.
@@ -327,8 +346,10 @@ boolean checkRFIDKey()
             //is in keys list... move on to next step.
             if(tryKey(&masterKey))
             {
+#ifdef DEBUG_RFID               
               if(manageMe)
                 Serial.print(F("Card Detected."));
+#endif                
               //success! check token
               byte status;
               byte buffer[18];
@@ -374,8 +395,9 @@ boolean checkRFIDKey()
 
                   if(manageMe)
                     Serial.println(F("AUTH SUCCESS! Alarm Disarmed."));
-                    if(!disarmNotified)
-                    {
+                  if(!disarmNotified)
+                  {
+                      //this only happens right when we disarm...
                       //beep twice so user knows alarm is disarmed;
 #ifdef BUZZER_PIN
                       digitalWrite(BUZZER_PIN, HIGH);
@@ -395,11 +417,9 @@ boolean checkRFIDKey()
                       alertCounter = 0;
                       delayCounter = 0;
                       
-                    }                   
+                  }                   
 
-
-                    //check once per second.
-                    delay(1500); //reduce checks to once every 1.5 sec to save battery when disarmed.
+                  delay(1500); //reduce checks to once every 1.5 sec to save battery when disarmed.
                   //note this loop will continue to execute and until the PICC is removed 
                   //  at which point the alarm will ARM!
                 
@@ -423,7 +443,7 @@ boolean checkRFIDKey()
         mpu.resetFIFO();
       }
     }
-		else if (!armNotified)
+    else if (!armNotified)
     {
       //we are trying to ARM
       //check phone network status and beep continuously if no network
@@ -472,7 +492,7 @@ boolean checkRFIDKey()
 void setup() {
   if(Serial)
     manageMe = true;
-		
+    
 #ifdef BUZZER_PIN
   pinMode(BUZZER_PIN, OUTPUT);
 #endif
@@ -498,15 +518,7 @@ void setup() {
       Serial.print("\n");
     }
 #endif    
-    while (1)
-		{
-#ifdef BUZZER_PIN
-      //error with FONA!!! beep continuously so user doeesn't think alarm is working
-      buzzerState = !buzzerState;
-      digitalWrite(BUZZER_PIN, buzzerState);
-      delay(medBeep);
-#endif
-    }
+    errorBeep(medBeep);
   }
 #ifdef DEBUG_FONA  
   if(manageMe)
@@ -540,6 +552,22 @@ void setup() {
     Serial.print("\n");
   }
 #endif
+
+#ifdef DEBUG_RFID  
+//test the mfrc 522
+  if(mfrc522.PCD_PerformSelfTest())
+  {
+    if(manageMe)
+      Serial.println(F("RFID Self Test Passed..."));        
+  }
+  else
+  {   
+    if(manageMe)
+      Serial.println(F("RFID Self Test FAILED!"));
+    errorBeep(medBeep);    
+  }
+#endif
+
 //now initialize the MPU6050
     // join I2C bus (I2Cdev library doesn't do this automatically)
     #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
@@ -569,13 +597,18 @@ void setup() {
       Serial.print("\n");
     }
 #endif
-    mpu.testConnection();
+    if(!mpu.testConnection())
+    {
+      //beep continuously?
+    }
     // load and configure the DMP
+#ifdef DEBUG_MPU      
     if(manageMe)
     {
       Serial.print(F("Initializing DMP..."));
       Serial.print("\n");
     }
+#endif    
     devStatus = mpu.dmpInitialize();
 
     // supply your own gyro offsets here, scaled for min sensitivity
@@ -639,8 +672,8 @@ void setup() {
     // configure LED for output
     pinMode(LED_PIN, OUTPUT);
 
-    //insert a delay here so we do't beep out on the network being down while the cell phone boots
-    delay(3000);
+    //insert a delay here so we don't beep out on the network being down while the cell phone boots
+    delay(4000);
 
 }
 
@@ -755,21 +788,42 @@ bool sendAlert()
   // now send text message (with coordinates if available)
   if(manageMe)
     Serial.println(msg);
+    
   if(pretend)
   {
+#ifdef DEBUG_MSG       
     if(manageMe)
-      Serial.println(F("pretend is TRUE. Disable to send SMS for real."));
+      Serial.println(F("Not sending SMS, pretend == TRUE!"));
+#endif
+//if pretend is true, beep short - med - short instead of sending SMS 
+#ifdef BUZZER_PIN
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(shortBeep);
+  digitalWrite(BUZZER_PIN, LOW);
+  delay(shortBeep);
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(medBeep);
+  digitalWrite(BUZZER_PIN, LOW);
+  delay(shortBeep);
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(shortBeep);
+  digitalWrite(BUZZER_PIN, LOW);
+#endif      
     return true;               
   }
   else
   {
     if (!fona.sendSMS(alertPhone, msg)) {
+#ifdef DEBUG_MSG      
       if(manageMe)
         Serial.println(F("SMS Failed"));
+#endif        
       return false;
     } else {
+#ifdef DEBUG_MSG      
       if(manageMe)
         Serial.println(F("Sent SMS!"));
+#endif        
       return true;
     } 
   }
@@ -805,8 +859,10 @@ void loop() {
     
     if(alarmArmed)
     {
+#ifdef DEBUG_LOOP      
       if(manageMe)
         Serial.println(F("Alarm ARMED!"));
+#endif        
       mfrc522.PICC_HaltA();       // Halt PICC
       mfrc522.PCD_StopCrypto1();  // Stop encryption on PCD
 
@@ -975,8 +1031,10 @@ void loop() {
           // if alert delay is 0 then we just reset after the min delay and wait for movement
           delayCounter = 0;
           alertSent = false;
+#ifdef DEBUG_LOOP          
           if(manageMe)
            Serial.println(F("Delay expired!"));
+#endif           
         }
         // max delay has expired. send alert if alarm tripped
         if(alertDelay != 0 && (alertCounter > alertDelay) && alarmTripped)
@@ -986,6 +1044,10 @@ void loop() {
           {
             if(sendAlert())
             {
+#ifdef DEBUG_LOOP          
+          if(manageMe)
+           Serial.println(F("Repeat Alert Sent!"));
+#endif 
               alertCounter = 0;
               //reset delay counter here also to enforce delay
               delayCounter = 0;  
@@ -996,3 +1058,4 @@ void loop() {
       }
     }
 }
+
